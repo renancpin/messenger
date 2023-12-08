@@ -1,128 +1,116 @@
 package Client;
 
+import java.rmi.Remote;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
+import java.rmi.server.UnicastRemoteObject;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.BiConsumer;
 
-import javax.jms.*;
+import Server.ServerInterface;
 
-import org.apache.activemq.ActiveMQConnection;
-import org.apache.activemq.ActiveMQConnectionFactory;
+public class ClientModel implements ClientInterface {
+	private static String SERVER_NAME = "MessengerServer";
 
-public class ClientModel {
-    private static String url = ActiveMQConnection.DEFAULT_BROKER_URL;
+	private Registry registry = null;
+	private Remote remoteObject = null;
+	private ServerInterface server = null;
+	private String userName = null;
+	private boolean isOnline = false;
+	private BiConsumer<String, String> consumer = null;
 
-    private Connection connection;
-    private Session queueSession;
-    private Session topicSession;
+	public ClientModel() {
+		try {
+			remoteObject = UnicastRemoteObject.exportObject(this, 0);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 
-    private Map<String, MessageConsumer> topicConsumers = new HashMap<>();
+	public void setMessageConsumer(BiConsumer<String, String> consumer) {
+		this.consumer = consumer;
+	}
 
-    public void initialize() throws JMSException {
-        ConnectionFactory connectionFactory = new ActiveMQConnectionFactory(url);
-        connection = connectionFactory.createConnection();
-        connection.start();
+	public void connect(String userName) {
+		try {
+			registry = LocateRegistry.getRegistry();
+			registry.rebind(userName, remoteObject);
+			server = (ServerInterface) registry.lookup(SERVER_NAME);
+			server.connect(userName);
 
-        queueSession = connection.createSession(Session.AUTO_ACKNOWLEDGE);
-        topicSession = connection.createSession(Session.AUTO_ACKNOWLEDGE);
-    }
+			this.userName = userName;
+			this.isOnline = true;
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 
-    public void stop() {
-        try {
-            queueSession.close();
-            topicSession.close();
-            connection.close();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+	public void disconnect() {
+		try {
+			String userName = this.userName;
 
-    // ----------- QUEUES -----------
-    public void sendMessageToQueue(String queueName, String message) throws JMSException {
-    	if (queueName == null || queueName.equals("")) {
-    		return;
-    	}
-    	
-        Destination destination = queueSession.createQueue(queueName);
-        MessageProducer producer = queueSession.createProducer(destination);
-        producer.send(queueSession.createTextMessage(message));
-        producer.close();
-    }
+			this.isOnline = false;
+			this.userName = null;
 
-    public List<String> receiveMessagesFromQueue(String queueName) throws JMSException {
-    	if (queueName == null || queueName.equals("")) {
-    		return null;
-    	}
-    	
-        Destination destination = queueSession.createQueue(queueName);
-        MessageConsumer consumer = queueSession.createConsumer(destination);
-        List<String> messages = new ArrayList<>();
-        TextMessage message;
+			registry.unbind(userName);
+			server.disconnect(userName);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 
-        do {
-            message = (TextMessage) consumer.receive(10);
+	public boolean getIsOnline() {
+		return isOnline;
+	}
 
-            if (message != null) {
-                messages.add(message.getText());
-            }
-        } while (message != null);
+	public void addContact(String contact) throws Exception {
+		try {
+			server.addContact(userName, contact);
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new Exception("Usuario nao pode ser adicionado");
+		}
+	}
 
-        consumer.close();
+	public void removeContact(String contact) throws Exception {
+		try {
+			server.removeContact(userName, contact);
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new Exception("Usuario nao pode ser removido");
+		}
+	}
 
-        return messages;
-    }
+	public List<String> getContacts() {
+		try {
+			return server.getContacts(userName);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 
-    // -------- TOPICS ----------
-    public void sendMessageToTopic(String topicName, String message) throws JMSException {
-    	if (topicName == null || topicName.equals("")){
-    		return;
-    	}
-    	
-        Destination destination = topicSession.createTopic(topicName);
-        MessageProducer producer = topicSession.createProducer(destination);
-        producer.send(topicSession.createTextMessage(message));
-        producer.close();
-    }
+		return new ArrayList<String>();
+	}
 
-    public void subscribeToTopic(String topicName, BiConsumer<String, String> listener) throws JMSException {
-    	if (topicName == null || topicName.equals("")){
-    		return;
-    	}
-    	
-    	Destination destination = topicSession.createTopic(topicName);
-        MessageConsumer consumer = topicSession.createConsumer(destination);
+	public void sendMessage(String destination, String message) throws Exception {
+		if (!isOnline || userName == null || userName.equals("") || destination == null || destination.equals("")
+				|| message == null || message.equals("")) {
+			return;
+		}
 
-        topicConsumers.put(topicName, consumer);
+		server.sendMessage(userName, destination, message);
+	}
 
-        MessageListener onMessage = (message) -> {
-            if (message instanceof TextMessage) {
-                try {
-                    String lastMessage = ((TextMessage) message).getText();
+	@Override
+	public void handleMessage(String sender, String message) {
+		if (consumer == null) {
+			return;
+		}
 
-                    listener.accept(lastMessage, topicName);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-        };
-
-        consumer.setMessageListener(onMessage);
-    }
-
-    public void unsubscribeFromTopic(String topicName) throws JMSException {
-    	if (topicName == null || topicName.equals("")){
-    		return;
-    	}
-    	
-        MessageConsumer consumer = topicConsumers.remove(topicName);
-        
-        if (consumer == null) {
-        	return;
-        }
-        
-        consumer.setMessageListener(null);
-    	consumer.close();
-    }
+		try {
+			consumer.accept(sender, message);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 }
