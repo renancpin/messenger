@@ -1,16 +1,15 @@
-import Broker.BrokerModel;
-import Broker.BrokerView;
+import Client.ClientModel;
+import Client.ClientView;
 
 public class App {
-    public static void main(String args[]) {
-        BrokerModel broker = new BrokerModel();
+	public static void main(String args[]) {
+		ClientModel client = new ClientModel();
 
-        try {
-            broker.initialize();
-            BrokerView brokerview = new BrokerView(broker);
-            brokerview.start();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+		try {
+			ClientView clientView = new ClientView(client);
+			clientView.start();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 }
